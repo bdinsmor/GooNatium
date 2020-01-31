@@ -14,7 +14,7 @@ const client = new Client({
 
 async function getGoogleDetails(name, location) {
   const coords = location.coordinates;
-  const googleApiKey = "AIzaSyCr7hzoOSY3vsQp9uLGXTZlxHWvMRxg9mQ";
+  const key = "CHECK LOCAL";
   const fieldsToReturn = [
     "formatted_address",
     "name",
@@ -38,7 +38,7 @@ async function getGoogleDetails(name, location) {
     "," +
     coords[0] +
     "&key=" +
-    googleApiKey;
+    key;
   
   /**
    * this URL is if you want to do a distance search based on the coordinates
