@@ -1,6 +1,9 @@
 const { Client } = require("@elastic/elasticsearch");
 const fs = require("fs");
 const request = require("request-promise");
+
+require("dotenv").config();
+
 require("array.prototype.flatmap").shim();
 const client = new Client({
   cloud: {
@@ -14,20 +17,13 @@ const client = new Client({
 
 async function getGoogleDetails(name, location) {
   const coords = location.coordinates;
-  const key = "CHECK LOCAL";
-  const fieldsToReturn = [
-    "formatted_address",
-    "name",
-    "geometry",
-    "permanently_closed",
-    "place_id",
-    "photos",
-    "types",
-    "plus_code"
-  ];
+  const fieldsToReturn = ["formatted_address", "name", "geometry", "permanently_closed", "place_id", "photos", "types", "plus_code"];
   // price_level, rating, user_ratings_total, opening_hours cost more money to get back...
 
   // using this search will only return hits where the OSM name is indexed within the Google data somewhere
+
+  const apiKey = process.env.GOOGLEAPIKEY;
+
   const locationSearch =
     "https://maps.googleapis.com/maps/api/place/findplacefromtext/json?input=" +
     encodeURIComponent(name) +
@@ -38,8 +34,8 @@ async function getGoogleDetails(name, location) {
     "," +
     coords[0] +
     "&key=" +
-    key;
-  
+    apiKey;
+
   /**
    * this URL is if you want to do a distance search based on the coordinates
    * const url =
@@ -50,7 +46,7 @@ async function getGoogleDetails(name, location) {
     "&rankby=distance&types=restaurant&key=" +
     apiKey;
 **/
-  
+
   try {
     const res = await request(locationSearch);
     if (res) {
@@ -90,7 +86,7 @@ async function run() {
     },
     { ignore: [400] }
   );
-console.log("created locations index!");
+  console.log("created locations index!");
   let dataset = JSON.parse(fs.readFileSync("berlin2.geojson", "utf8"));
   dataset = dataset.features;
   const locations = [];
@@ -119,11 +115,11 @@ console.log("created locations index!");
       l.googleDetails = await getGoogleDetails(l.name, l.location);
     }
 
-      console.log("finished " + i);
-    
+    console.log("finished " + i);
+
     locations.push(l);
   }
-  
+
   console.log("# of records to index: " + location.length);
   const body = locations.flatMap(doc => [{ index: { _index: "locations", _id: doc.id } }, doc]);
   const { body: bulkResponse } = await client.bulk({ refresh: true, body });
@@ -151,7 +147,7 @@ console.log("created locations index!");
   }
 
   const { body: count } = await client.count({ index: "locations" });
- console.log("doc count: " + JSON.stringify(count, null, 2));
+  console.log("doc count: " + JSON.stringify(count, null, 2));
 }
 
 run().catch(console.log);
