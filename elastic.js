@@ -17,7 +17,8 @@ const client = new Client({
   }
 });
 
-async function getGoogleDetails(name, location) {
+async function getGoogleDetails(name, geometry) {
+  const location = geometry.coordinates;
   const fieldsToReturn = ["price_level", "rating", "user_ratings_total", "opening_hours","formatted_address", "name", "geometry", "permanently_closed", "place_id", "photos", "types", "plus_code"];
   // price_level, rating, user_ratings_total, opening_hours cost more money to get back...
 
@@ -31,9 +32,9 @@ async function getGoogleDetails(name, location) {
     "&inputtype=textquery&fields=" +
     fieldsToReturn.join(",") +
     "&locationbias=circle:100@" +
-    location.lat +
+    location[1] +
     "," +
-   location.lon +
+   location[0] +
     "&key=" +
     apiKey;
 
@@ -138,12 +139,15 @@ async function run() {
 
                     if (dataset[i].lat && dataset[i].lon) {
                       l.location = {
-                        lat: dataset[i].lat,
-                        lon: dataset[i].lon
+                        type: "Point",
+                        coordinates: [
+                          dataset[i].lon,
+                          dataset[i].lat
+                        ]
                       };
 
                       l.googleDetails = await getGoogleDetails(l.name, l.location);
-                      console.log("google details: " + JSON.stringify(l.googleDetails, null, 2));
+                      // console.log("google details: " + JSON.stringify(l.googleDetails, null, 2));
                     }
                     console.log("finished: " + (i + 1));
                     gooData.push(l);
