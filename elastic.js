@@ -18,7 +18,6 @@ const client = new Client({
 });
 
 async function getGoogleDetails(name, location) {
-  const coords = location.coordinates;
   const fieldsToReturn = ["price_level", "rating", "user_ratings_total", "opening_hours","formatted_address", "name", "geometry", "permanently_closed", "place_id", "photos", "types", "plus_code"];
   // price_level, rating, user_ratings_total, opening_hours cost more money to get back...
 
@@ -32,9 +31,9 @@ async function getGoogleDetails(name, location) {
     "&inputtype=textquery&fields=" +
     fieldsToReturn.join(",") +
     "&locationbias=circle:100@" +
-    coords[1] +
+    location.lat +
     "," +
-    coords[0] +
+   location.lon +
     "&key=" +
     apiKey;
 
@@ -79,7 +78,8 @@ async function run() {
             id: { type: "keyword" },
             name: { type: "keyword" },
             amenity: { type: "keyword" },
-            properties: { type: "object" },
+            tags: { type: "object" },
+            googleDetails: { type: "object"},
             location: { type: "geo_shape" },
             doi: { type: "date" }
           }
@@ -90,48 +90,66 @@ async function run() {
   );
   console.log("created locations index!");
   let gooData = null;
+  const overpassUrl = "http://overpass-api.de/api/interpreter";
   try {
     if (fs.existsSync("goonatim.json")) {
-       gooData = JSON.parse(fs.readFileSync("goonatim", "utf8"));
+      gooData = JSON.parse(fs.readFileSync("goonatim.json", "utf8"));
     }
   } catch (err) {
     console.error(err);
   }
   if (!gooData) {
-    gooData = [];
-    // didnt find enriched google data locally, will reach out to google places API and grab it again
-      let dataset = JSON.parse(fs.readFileSync("berlin2.geojson", "utf8"));
-      dataset = dataset.features;
-      
-      const max = 25;
-      if (dataset.length > max) {
-        dataset = dataset.slice(0, max);
-      }
-      for (let i = 0; i < dataset.length; i++) {
-        if (!dataset[i].properties || !dataset[i].properties.name) {
-          continue;
-        }
-        const l = {
-          properties: dataset[i].properties,
-          doi: new Date(),
-          name: dataset[i].properties.name,
-          amenity: dataset[i].properties.amenity
-        };
-        if (dataset[i].id) {
-          l.id = dataset[i].id;
-        } else if (dataset[i].properties && dataset[i].properties["@id"]) {
-          l.id = dataset[i].properties["@id"];
-        }
+                  //query overpass interpreter api to get OSM results for bounding box - post body payload has to be URI encoded
+                  gooData = [];
+                  const postBody =
+                    "data=%0A%5Bout%3Ajson%5D%5Btimeout%3A1000%5D%5Bbbox%3A52.26311463698559%2C13.18702697753906%2C52.74959372674114%2C13.663558959960936%5D%3B%0A(+node%5B%22amenity%22~%22restaurant%7Cbar%7Ccafe%22%5D%3B%0A++way%5B%22amenity%22~%22restaurant%7Cbar%7Ccafe%22%5D%3B%0A++relation%5B%22amenity%22~%22restaurant%7Cbar%7Ccafe%22%5D%3B+)%3B%0Aout+center%3B%0A";
+                  // data=[out:json][timeout:1000][bbox:52.26311463698559,13.18702697753906,52.74959372674114,13.663558959960936];(+node["amenity"~"restaurant|bar|cafe"];++way["amenity"~"restaurant|bar|cafe"];++relation["amenity"~"restaurant|bar|cafe"];+);out+center;
+                  let overpassRes = await request({ url: overpassUrl, form: postBody });
+                  if (overpassRes) {
+                    overpassRes = JSON.parse(overpassRes);
+                  }
+                  if (overpassRes && overpassRes.elements) {
+                    dataset = overpassRes.elements;
+                    console.log("overpass returned: " + dataset.length + " results");
+                  }
 
-        if (dataset[i].geometry) {
-          l.location = dataset[i].geometry;
-          l.googleDetails = await getGoogleDetails(l.name, l.location);
-        }
-        console.log("finished: " + (i + 1));
-        gooData.push(l);
-    }
-    fs.writeFileSync("goonatim.json", JSON.stringify(gooData));
-  }
+                  // didnt find enriched google data locally, will reach out to google places API and grab it again
+                  // let dataset = JSON.parse(fs.readFileSync("berlin2.geojson", "utf8"));
+
+                  const max = 25;
+                  if (dataset.length > max) {
+                    dataset = dataset.slice(0, max);
+                  }
+                  for (let i = 0; i < dataset.length; i++) {
+                    if (!dataset[i].tags || !dataset[i].tags.name) {
+                      continue;
+                    }
+                    const l = {
+                      tags: dataset[i].tags,
+                      doi: new Date(),
+                      name: dataset[i].tags.name,
+                      amenity: dataset[i].tags.amenity
+                    };
+                    if (dataset[i].id) {
+                      l.id = dataset[i].id;
+                    } else if (dataset[i].tags && dataset[i].tags["@id"]) {
+                      l.id = dataset[i].tags["@id"];
+                    }
+
+                    if (dataset[i].lat && dataset[i].lon) {
+                      l.location = {
+                        lat: dataset[i].lat,
+                        lon: dataset[i].lon
+                      };
+
+                      l.googleDetails = await getGoogleDetails(l.name, l.location);
+                      console.log("google details: " + JSON.stringify(l.googleDetails, null, 2));
+                    }
+                    console.log("finished: " + (i + 1));
+                    gooData.push(l);
+                  }
+                  fs.writeFileSync("goonatim.json", JSON.stringify(gooData));
+                }
 
 
   console.log("# of records to index: " + gooData.length);
