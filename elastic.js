@@ -8,7 +8,8 @@ require("array.prototype.flatmap").shim();
 const client = new Client({
   cloud: {
     //id: "GooNatium:dXMtZWFzdC0xLmF3cy5mb3VuZC5pbyQwNTM1MzAxZjFhMTY0NDYyYTk1YWI1ODYxOWY2ZmRkOCQ0ZmJmZGVkMzY2M2M0NDFhOTVjMzBmY2Q5MzkxMzA0Zg=="
-    id: "placesearch:ZXUtY2VudHJhbC0xLmF3cy5jbG91ZC5lcy5pbyQ0Njc1MDRkNGY0OTY0MmNkOGY3ZDk5MmRjMDJjMDdhMSQ4Y2YxMTQ4ZTdkNjg0MDA2YmRkYmNjN2E4MmY2ZTkzOA=="
+    id:
+      "placesearch:ZXUtY2VudHJhbC0xLmF3cy5jbG91ZC5lcy5pbyQ0Njc1MDRkNGY0OTY0MmNkOGY3ZDk5MmRjMDJjMDdhMSQ4Y2YxMTQ4ZTdkNjg0MDA2YmRkYmNjN2E4MmY2ZTkzOA=="
   },
   auth: {
     username: "elastic",
@@ -19,7 +20,20 @@ const client = new Client({
 
 async function getGoogleDetails(name, geometry) {
   const location = geometry.coordinates;
-  const fieldsToReturn = ["price_level", "rating", "user_ratings_total", "opening_hours","formatted_address", "name", "geometry", "permanently_closed", "place_id", "photos", "types", "plus_code"];
+  const fieldsToReturn = [
+    "price_level",
+    "rating",
+    "user_ratings_total",
+    "opening_hours",
+    "formatted_address",
+    "name",
+    "geometry",
+    "permanently_closed",
+    "place_id",
+    "photos",
+    "types",
+    "plus_code"
+  ];
   // price_level, rating, user_ratings_total, opening_hours cost more money to get back...
 
   // using this search will only return hits where the OSM name is indexed within the Google data somewhere
@@ -34,7 +48,7 @@ async function getGoogleDetails(name, geometry) {
     "&locationbias=circle:100@" +
     location[1] +
     "," +
-   location[0] +
+    location[0] +
     "&key=" +
     apiKey;
 
@@ -80,9 +94,12 @@ async function run() {
             name: { type: "keyword" },
             amenity: { type: "keyword" },
             tags: { type: "object" },
-            googleDetails: { type: "object"},
+            googleDetails: { type: "object" },
             location: { type: "geo_shape" },
-            doi: { type: "date" }
+            doi: { type: "date" },
+            userRatingsTotal: { type: "integer" },
+            rating: { type: "double" },
+            priceLevel: { type: "integery"}
           }
         }
       }
@@ -100,65 +117,71 @@ async function run() {
     console.error(err);
   }
   if (!gooData) {
-                  //query overpass interpreter api to get OSM results for bounding box - post body payload has to be URI encoded
-                  gooData = [];
-                  const postBody =
-                    "data=%0A%5Bout%3Ajson%5D%5Btimeout%3A1000%5D%5Bbbox%3A52.26311463698559%2C13.18702697753906%2C52.74959372674114%2C13.663558959960936%5D%3B%0A(+node%5B%22amenity%22~%22restaurant%7Cbar%7Ccafe%22%5D%3B%0A++way%5B%22amenity%22~%22restaurant%7Cbar%7Ccafe%22%5D%3B%0A++relation%5B%22amenity%22~%22restaurant%7Cbar%7Ccafe%22%5D%3B+)%3B%0Aout+center%3B%0A";
-                  // data=[out:json][timeout:1000][bbox:52.26311463698559,13.18702697753906,52.74959372674114,13.663558959960936];(+node["amenity"~"restaurant|bar|cafe"];++way["amenity"~"restaurant|bar|cafe"];++relation["amenity"~"restaurant|bar|cafe"];+);out+center;
-                  let overpassRes = await request({ url: overpassUrl, form: postBody });
-                  if (overpassRes) {
-                    overpassRes = JSON.parse(overpassRes);
-                  }
-                  if (overpassRes && overpassRes.elements) {
-                    dataset = overpassRes.elements;
-                    console.log("overpass returned: " + dataset.length + " results");
-                  }
+    //query overpass interpreter api to get OSM results for bounding box - post body payload has to be URI encoded
+    gooData = [];
+    //  const postBody =
+    //     "data=%0A%5Bout%3Ajson%5D%5Btimeout%3A1000%5D%5Bbbox%3A52.26311463698559%2C13.18702697753906%2C52.74959372674114%2C13.663558959960936%5D%3B%0A(+node%5B%22amenity%22~%22restaurant%7Cbar%7Ccafe%22%5D%3B%0A++way%5B%22amenity%22~%22restaurant%7Cbar%7Ccafe%22%5D%3B%0A++relation%5B%22amenity%22~%22restaurant%7Cbar%7Ccafe%22%5D%3B+)%3B%0Aout+center%3B%0A";
+    const postBody = "data=" + encodeURI(process.env.OVERPASSQUERY);
+    let overpassRes = await request({ url: overpassUrl, form: postBody });
+    if (overpassRes) {
+      overpassRes = JSON.parse(overpassRes);
+    }
+    if (overpassRes && overpassRes.elements) {
+      dataset = overpassRes.elements;
+      console.log("overpass returned: " + dataset.length + " results");
+    }
 
-                  // didnt find enriched google data locally, will reach out to google places API and grab it again
-                  // let dataset = JSON.parse(fs.readFileSync("berlin2.geojson", "utf8"));
+    // didnt find enriched google data locally, will reach out to google places API and grab it again
+    // let dataset = JSON.parse(fs.readFileSync("berlin2.geojson", "utf8"));
 
-                  const max = 25;
-                  if (dataset.length > max) {
-                    dataset = dataset.slice(0, max);
-                  }
-                  for (let i = 0; i < dataset.length; i++) {
-                    if (!dataset[i].tags || !dataset[i].tags.name) {
-                      continue;
-                    }
-                    const l = {
-                      tags: dataset[i].tags,
-                      doi: new Date(),
-                      name: dataset[i].tags.name,
-                      amenity: dataset[i].tags.amenity
-                    };
-                    if (dataset[i].id) {
-                      l.id = dataset[i].id;
-                    } else if (dataset[i].tags && dataset[i].tags["@id"]) {
-                      l.id = dataset[i].tags["@id"];
-                    }
+    const max = 10;
+    if (dataset.length > max) {
+      dataset = dataset.slice(0, max);
+    }
+    for (let i = 0; i < dataset.length; i++) {
+      if (!dataset[i].tags || !dataset[i].tags.name) {
+        continue;
+      }
+      const l = {
+        tags: dataset[i].tags,
+        doi: new Date(),
+        name: dataset[i].tags.name,
+        amenity: dataset[i].tags.amenity
+      };
+      if (dataset[i].id) {
+        l.id = dataset[i].id;
+      } else if (dataset[i].tags && dataset[i].tags["@id"]) {
+        l.id = dataset[i].tags["@id"];
+      }
 
-                    if (dataset[i].lat && dataset[i].lon) {
-                      l.location = {
-                        type: "Point",
-                        coordinates: [
-                          dataset[i].lon,
-                          dataset[i].lat
-                        ]
-                      };
+      if (dataset[i].lat && dataset[i].lon) {
+        l.location = {
+          type: "Point",
+          coordinates: [dataset[i].lon, dataset[i].lat]
+        };
 
-                      l.googleDetails = await getGoogleDetails(l.name, l.location);
-                      // console.log("google details: " + JSON.stringify(l.googleDetails, null, 2));
-                    }
-                    console.log("finished: " + (i + 1));
-                    gooData.push(l);
-                  }
-                  fs.writeFileSync("goonatim.json", JSON.stringify(gooData));
-                }
-
+        l.googleDetails = await getGoogleDetails(l.name, l.location);
+        if (l.googleDetails) {
+          if (l.googleDetails["price_level"]) {
+            l.priceLevel = l.googleDetails["price_level"];
+          }
+          if (l.googleDetails["user_ratings_total"]) {
+            l.userRatingsTotal = l.googleDetails["user_ratings_total"];
+          }
+          if (l.googleDetails["rating"]) {
+            l.rating = l.googleDetails["rating"];
+          }
+        }
+        // console.log("google details: " + JSON.stringify(l.googleDetails, null, 2));
+      }
+      console.log("finished: " + (i + 1));
+      gooData.push(l);
+    }
+    fs.writeFileSync("goonatim.json", JSON.stringify(gooData));
+  }
 
   console.log("# of records to index: " + gooData.length);
-  
-  
+
   const body = gooData.flatMap(doc => [{ index: { _index: "locations", _id: doc.id } }, doc]);
   const { body: bulkResponse } = await client.bulk({ refresh: true, body });
 
